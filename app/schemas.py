@@ -8,23 +8,23 @@ from pydantic import BaseModel, Field
 from .planner import MAX_VOLUMES
 
 
-class CopyIn(BaseModel):
-    file: str = Field(min_length=1, description="待取文件名")
+class CatalogCopyIn(BaseModel):
+    file: str = Field(min_length=1, description="文件名")
     volume: int = Field(ge=1, description="卷号")
     position: int = Field(ge=1, description="卷内序号")
 
-    model_config = {"json_schema_extra": {"examples": [{"file": "A", "volume": 1, "position": 2}]}}
+    model_config = {
+        "json_schema_extra": {"examples": [{"file": "A", "volume": 1, "position": 2}]}
+    }
 
 
-class JobIn(BaseModel):
-    files: list[str] = Field(min_length=1, description="待取文件清单")
-    copies: list[CopyIn] = Field(description=f"副本目录（不同卷号至多 {MAX_VOLUMES} 个）")
+class LibraryIn(BaseModel):
+    copies: list[CatalogCopyIn] = Field(description=f"全库副本目录（不同卷号至多 {MAX_VOLUMES} 个）")
 
     model_config = {
         "json_schema_extra": {
             "examples": [
                 {
-                    "files": ["A", "B", "C", "D", "E", "F"],
                     "copies": [
                         {"file": "A", "volume": 1, "position": 2},
                         {"file": "A", "volume": 2, "position": 5},
@@ -35,10 +35,62 @@ class JobIn(BaseModel):
                         {"file": "E", "volume": 3, "position": 6},
                         {"file": "F", "volume": 1, "position": 9},
                         {"file": "F", "volume": 3, "position": 8},
-                    ],
+                    ]
                 }
             ]
         }
+    }
+
+
+class RemovalIn(BaseModel):
+    volumes: list[int] = Field(min_length=1, description="本次整批下架的卷号")
+
+    model_config = {"json_schema_extra": {"examples": [{"volumes": [2]}]}}
+
+
+class ReturnIn(BaseModel):
+    volume: int = Field(ge=1, description="送检结束、归还的卷号")
+
+    model_config = {"json_schema_extra": {"examples": [{"volume": 2}]}}
+
+
+class CatalogCopyOut(CatalogCopyIn):
+    readable: bool = Field(description="库目录中该副本是否可读（读坏后永久为 false）")
+
+
+class VolumeOut(BaseModel):
+    volume: int
+    online: bool = Field(description="是否在线（false = 送检中/已下架）")
+    removal_id: int | None = Field(description="所属下架申请编号（送检中才有）")
+
+
+class RemovalOut(BaseModel):
+    id: int
+    volumes: list[int]
+    state: Literal["open", "closed"] = Field(description="全部归还后为 closed")
+    returned: list[int]
+
+
+class LibraryOut(BaseModel):
+    files: list[str]
+    volumes: list[VolumeOut]
+    copies: list[CatalogCopyOut]
+    removals: list[RemovalOut]
+    events: list[dict]
+    occupied_volumes: list[int] = Field(description="被进行中的作业占用的卷")
+    active_job_id: int | None
+
+
+class RemovalResultOut(BaseModel):
+    removal: RemovalOut
+    library: LibraryOut
+
+
+class JobIn(BaseModel):
+    files: list[str] = Field(min_length=1, description="待取文件清单")
+
+    model_config = {
+        "json_schema_extra": {"examples": [{"files": ["A", "B", "C", "D", "E", "F"]}]}
     }
 
 
@@ -48,7 +100,9 @@ class ReceiptIn(BaseModel):
     file: str = Field(min_length=1)
     volume: int = Field(ge=1)
     position: int = Field(ge=1)
-    result: Literal["ok", "failed"] = Field(description="ok=读取成功；failed=读带失败（带头照样推进，副本停用）")
+    result: Literal["ok", "failed"] = Field(
+        description="ok=读取成功；failed=读带失败（带头照样推进，副本在两处均标为不可读）"
+    )
 
     model_config = {
         "json_schema_extra": {
@@ -76,12 +130,15 @@ class PlanOut(BaseModel):
 
 
 class StateOut(BaseModel):
+    job_id: int
+    files: list[str]
     current_volume: int | None = Field(description="当前已挂载的卷号（空机为 null）")
     head: int = Field(description="带头当前卷内序号")
     pending: list[str]
     done: list[str]
     unretrievable: list[str]
-    disabled_copies: list[CopyIn]
+    disabled_copies: list[CatalogCopyIn]
+    occupied_volumes: list[int] = Field(description="待取文件的可读副本所占用的卷")
     executed: dict[str, int] = Field(description="已确认的装带/回卷/成功/失败次数")
     history: list[dict]
 
