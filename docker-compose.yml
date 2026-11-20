@@ -1,0 +1,8 @@
+services:
+  tape-drive:
+    build: .
+    image: tape-drive-sim:latest
+    container_name: tape-drive-sim
+    ports:
+      - "8000:8000"
+    restart: unless-stopped
